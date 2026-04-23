@@ -1182,6 +1182,63 @@ begin
     plot!(legend=:topright)
 end
 
+# ╔═╡ NEW: Sink Rate Functions
+begin
+    """
+    Sink_Rate(TAS, h, CD0, Sw, e, W, AR)
+    
+    Calculate the sink rate (rate of descent) for a glider in steady flight.
+    Positive values indicate descent (m/s).
+    """
+    Sink_Rate(TAS, h, CD0, Sw, e, W, AR) = Power_required(TAS, h, CD0, Sw, e, W, AR) / W
+    
+    """
+    Min_Sink_Speed(CD0, Sw, e, W, AR, h)
+    
+    Speed for minimum sink rate (same as speed for maximum endurance = Vy for gliders).
+    """
+    Min_Sink_Speed(CD0, Sw, e, W, AR, h) = VMDV(CD0, Sw, e, W, AR, h)
+    
+    """
+    Min_Sink_Rate(CD0, Sw, e, W, AR, h)
+    
+    The minimum sink rate a glider can achieve.
+    """
+    Min_Sink_Rate(CD0, Sw, e, W, AR, h) = Minimum_power_required(CD0, Sw, e, W, AR, h) / W
+end;
+
+# ╔═╡ NEW: Plot Sink Rate
+begin
+    v5 = LinRange(TASstall, max_TAS_plot, 150)
+    sink_rates = Sink_Rate.(v5, Alt_op, CD0, Sw, Oswald, Mass*g(), AR)
+    
+    ymax_sr = 1.2 * maximum(sink_rates)
+    
+    plot(xlims=(TASstall, max_TAS_plot), ylims=(0, ymax_sr), 
+         xticks=x_tick_values, leg=true, size=(660, 400),
+         grid=(:xy, :olivedrab, :dot, 0.5, 0.8), xrotation=45,
+         xlabel="TAS (m/s)", ylabel="Sink Rate (m/s)", 
+         title="Glider Sink Rate at $(Alt_op)m")
+    
+    plot!(v5, sink_rates, label="Sink Rate", linewidth=3, color=:blue)
+    
+    # Calculate minimum sink speed
+    min_sink_speed = Min_Sink_Speed(CD0, Sw, Oswald, Mass*g(), AR, Alt_op)
+    min_sink = Min_Sink_Rate(CD0, Sw, Oswald, Mass*g(), AR, Alt_op)
+    
+    scatter!([min_sink_speed], [min_sink], label="Min Sink", ms=6, color=:red)
+    annotate!([min_sink_speed], [min_sink*1.1], 
+              text("Min Sink\n$(round(min_sink; digits=2)) m/s\n$(round(min_sink_speed; digits=1)) m/s", 8, :red, :center))
+    
+    plot!(legend=:topleft)
+end
+
+# ╔═╡ NEW: Display Sink Rate Info
+md"""
+**Minimum Sink Rate**: $(round(Min_Sink_Rate(CD0, Sw, Oswald, Mass*g(), AR, Alt_op); digits=3)) m/s 
+at $(round(Min_Sink_Speed(CD0, Sw, Oswald, Mass*g(), AR, Alt_op); digits=1)) m/s TAS
+"""
+
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
@@ -2380,6 +2437,148 @@ version = "1.4.1+2"
 # ╟─13b762d4-366a-47a5-ad77-a18e2b187b78
 # ╟─a57e579f-5c6e-48f6-a390-2d3b7b816372
 # ╟─5afceffa-6e23-422e-81ee-4aee76899d93
+# ╔═╡ XFLR5_SECTION_1: Header
+md"""
+---
+## 📊 Oswald Factor (e) y CD₀ desde XFLR5
+
+**¿Qué necesitas de XFLR5?**
+1. Abre XFLR5 y crea un análisis de tu ala
+2. En **Polars**, exporta los datos con columnas: **TAS, CL, CD**
+3. Copia aquí abajo los valores
+
+**Fórmula que usaremos:**
+"""
+
+# ╔═╡ XFLR5_SECTION_2: Input Box
+begin
+    md"""
+    ### Pega aquí tus datos de XFLR5:
+    
+    **Formato:** Cada línea con: `TAS   CL   CD`  
+    (separados por espacios o comas)
+    
+    **Ejemplo:**
+    ```
+    30.0  0.85  0.048
+    35.0  0.72  0.038
+    40.0  0.62  0.032
+    ```
+    """
+end
+
+# ╔═╡ XFLR5_SECTION_3: Text Area
+begin
+    xflr5_data_text = @bind xflr5_input TextArea(cols=70, rows=12)
+    xflr5_data_text
+end
+
+# ╔═╡ XFLR5_SECTION_4: Parse Data
+begin
+    xflr5_data = []
+    e_values = []
+    
+    if xflr5_input != ""
+        lines = split(xflr5_input, "\n")
+        for line in lines
+            line = strip(line)
+            # Ignorar líneas vacías y comentarios
+            if !isempty(line) && !startswith(line, "#")
+                try
+                    # Reemplazar comas por espacios y separar
+                    line_clean = replace(line, "," => " ")
+                    values = parse.(Float64, split(line_clean, r"\s+"; keepempty=false))
+                    
+                    if length(values) >= 3
+                        TAS_val = values[1]
+                        CL_val = values[2]
+                        CD_val = values[3]
+                        push!(xflr5_data, (TAS_val, CL_val, CD_val))
+                        
+                        # Calcular e
+                        if CD_val > CD0 && CL_val > 0.01
+                            e_calc = CL_val^2 / (π * AR * (CD_val - CD0))
+                            push!(e_values, e_calc)
+                        end
+                    end
+                catch e
+                    # Skip bad lines silently
+                end
+            end
+        end
+    end
+    
+    nothing  # Don't show output yet
+end
+
+# ╔═╡ XFLR5_SECTION_5: Results Table
+begin
+    if length(xflr5_data) > 0
+        
+        md"""
+        ### ✅ Datos recibidos: $(length(xflr5_data)) puntos
+        
+        | TAS (m/s) | CL | CD | e calculado |
+        |-----------|----|----|-------------|
+        """ *
+        join([
+            "| $(round(pt[1]; digits=1)) | $(round(pt[2]; digits=3)) | $(round(pt[3]; digits=4)) | $(length(e_values) >= i ? string(round(e_values[i]; digits=4)) : "—") |"
+            for (i, pt) in enumerate(xflr5_data)
+        ], "\n")
+    else
+        md"⏳ *Esperando datos...*"
+    end
+end
+
+# ╔═╡ XFLR5_SECTION_6: Statistics
+begin
+    if length(e_values) > 1
+        e_mean = mean(e_values)
+        e_std = std(e_values)
+        e_min = minimum(e_values)
+        e_max = maximum(e_values)
+        
+        md"""
+        ### 📈 Resultados del Análisis XFLR5
+        
+        | Parámetro | Valor |
+        |-----------|-------|
+        | **e (Oswald factor) - Promedio** | **$(round(e_mean; digits=4))** ← USE THIS |
+        | Desv. Estándar | $(round(e_std; digits=4)) |
+        | Mínimo | $(round(e_min; digits=4)) |
+        | Máximo | $(round(e_max; digits=4)) |
+        | Puntos analizados | $(length(e_values)) |
+        | AR usado | $(AR) |
+        | CD₀ usado | $(CD0) |
+        
+        ---
+        ### 🎯 **Instrucciones Finales:**
+        
+        1. Ve al slider de **Oswald** arriba ↑
+        2. Cambia el valor a: **$(round(e_mean; digits=4))**
+        3. Recalculará automáticamente los gráficos
+        """
+    elseif length(xflr5_data) > 0
+        md"⚠️ No se pudo calcular e. Verifica que CD > CD₀ = $(CD0)"
+    else
+        md"""
+        ### 📝 ¿Cómo obtener datos de XFLR5?
+        
+        **Opción 1: Exportar tabla**
+        - En XFLR5: Analysis → View → Export Polar
+        - Copia columnas: TAS, CL, CD
+        
+        **Opción 2: Copiar manualmente**
+        - Abre Polars en XFLR5
+        - Selecciona 8-12 puntos a diferentes velocidades
+        - Copia los valores TAS, CL, CD
+        
+        **Opción 3: Desde archivo**
+        - XFLR5 puede exportar a .txt
+        - Copia las líneas aquí arriba
+        """
+    end
+end
 # ╟─8b1ccfb8-6b6c-4caa-823f-b16b59eee635
 # ╟─30a993d1-1dc7-4dd8-894c-60bc1a83c9a7
 # ╟─9c5749c5-76bb-4549-b978-22cab6c98337
